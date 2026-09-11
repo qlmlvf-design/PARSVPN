@@ -1,95 +1,36 @@
-name: build
+name: Build PARSAVIP APK
 
 on:
-  workflow_call:
-    inputs:
-      target: # windows linux macos
-        required: true
-        type: string
-      project:
-        required: false
-        type: string
-        default: './v2rayN.Desktop/v2rayN.Desktop.csproj'
+  push:
+    branches: [ master ]
+  workflow_dispatch:
 
 jobs:
   build:
-    name: build x64 arm64
-    strategy:
-      matrix:
-        arch: [ x64, arm64 ]
-    runs-on: |-
-      ${{
-        case(
-          inputs.target == 'macos', 'macos-latest',
-          inputs.target == 'linux', 'ubuntu-24.04',
-          inputs.target == 'windows', 'windows-latest',
-          'ubuntu-latest'
-        )
-      }}
-    env:
-      Output: "${{ github.workspace }}/${{ matrix.arch }}"
-      RID: |-
-        ${{
-          case(
-            inputs.target == 'macos', format('osx-{0}', matrix.arch),
-            inputs.target == 'windows', format('win-{0}', matrix.arch),
-            format('{0}-{1}', inputs.target, matrix.arch)
-          )
-        }}
-      Project: ${{ inputs.project }}
-      ExtOpt: |-
-        ${{
-          case(
-            inputs.target == 'windows', '-p:EnableWindowsTargeting=true',
-            ''
-          )
-        }}
-
+    runs-on: ubuntu-latest
     steps:
-    - name: Checkout
-      uses: actions/checkout@v7
-      with:
-        submodules: 'recursive'
-        fetch-depth: '0'
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
 
-    - name: Purge SDKs
-      shell: pwsh
-      run: |
-        echo "Before:"
-        dotnet --list-sdks
-        
-        dotnet --list-sdks | % {
-          $_ -match '^\S+\s+\[(.+)\]$' > $null
-          $d = Join-Path $Matches[1] $_.Split()[0]
-          Write-Host "Removing $d"
-          if ($IsWindows) { rm $d -r -fo } else { sudo rm -rf "$d" }
-        }
-        
-        echo "After:"
-        dotnet --list-sdks 2>$null; $LASTEXITCODE=0
+      - name: set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          java-version: '21'
+          distribution: 'temurin'
 
-    - name: Setup .NET
-      uses: actions/setup-dotnet@v6
-      with:
-        dotnet-version: 10.0.1xx
-        
-    - name: Build v2rayN
-      shell: bash
-      working-directory: ./v2rayN
-      run: dotnet publish $Project -c Release -r $RID -p:SelfContained=true $ExtOpt -o $Output
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
 
-    - name: Build AmazTool
-      shell: bash
-      working-directory: ./v2rayN
-      run: dotnet publish ./AmazTool/AmazTool.csproj -c Release -r $RID -p:SelfContained=true -p:PublishTrimmed=true $ExtOpt -o $Output
+      - name: Install NDK
+        run: |
+          echo "y" | sdkmanager "ndk;27.0.12077973" || true
 
-    - name: Remove Debug Symbols
-      shell: bash
-      run: |
-        find ${{ matrix.arch }} -type f -name '*.pdb' -delete
+      - name: Build Debug APK
+        run: ./gradlew assembleDebug
 
-    - name: Upload build artifacts
-      uses: actions/upload-artifact@v7
-      with:
-        name: ${{ matrix.arch }}
-        path: ${{ matrix.arch }}
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: PARSAVIP-debug
+          path: app/build/outputs/apk/debug/app-debug.apk
